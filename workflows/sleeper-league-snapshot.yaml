@@ -1,0 +1,190 @@
+id: b20ae3d5-b27e-432f-a865-e5bb057cb5ac
+name: '@dougschaefer/sleeper-league-snapshot'
+description: >-
+  Capture the full current state of one Sleeper fantasy league in a single run:
+  the player catalogue, the season's week, the league's settings and scoring,
+  every roster with owners joined and standings derived, this week's matchups
+  and transactions, traded picks, the playoff bracket, and the league-wide
+  add/drop trend. Everything the Sleeper API exposes is read-only, so this run
+  cannot change a lineup or a roster.
+
+  Refresh the player catalogue first, because the roster, transaction, and
+  trending reads resolve player IDs to names from the local copy. That step is
+  the one large request the model makes (~14 MB), and Sleeper asks that it be
+  pulled no more than once a day, so it is allowed to fail: the reads that
+  follow still run and simply report players by ID.
+
+  Steps run sequentially because they share one model instance and would
+  otherwise contend on the per-model lock. Before the season starts, the
+  matchup, transaction, and pick reads return legitimately empty results — those
+  are recorded as empty, not treated as failures.
+tags: {}
+inputs:
+  properties:
+    instance:
+      type: string
+      default: sleeper-nfl
+      description: Name of the @dougschaefer/sleeper model instance to read
+    leagueId:
+      type: string
+      default: ""
+      description: >-
+        League to snapshot. Leave blank to use the instance's defaultLeagueId.
+    season:
+      type: string
+      default: ""
+      description: >-
+        Season to list leagues for, e.g. 2026. Blank uses the current season.
+    trend:
+      type: string
+      default: add
+      description: Whether the trend read reports the most added or most dropped players
+    trendLimit:
+      type: integer
+      default: 25
+      description: Number of trending players to capture
+jobs:
+  - name: snapshot
+    description: Refresh the player catalogue, then read the league end to end
+    steps:
+      - name: sync-players
+        description: >-
+          Cache the Sleeper player catalogue so later steps resolve player IDs
+          to names. Allowed to fail: the reads degrade to raw IDs rather than
+          stopping.
+        task:
+          type: model_method
+          modelIdOrName: ${{ inputs.instance }}
+          methodName: syncPlayers
+        dependsOn: []
+        weight: 0
+        allowFailure: true
+      - name: state
+        description: Read the sport's current season, week, and season type
+        task:
+          type: model_method
+          modelIdOrName: ${{ inputs.instance }}
+          methodName: state
+        dependsOn:
+          - step: sync-players
+            condition:
+              type: completed
+        weight: 0
+        allowFailure: false
+      - name: leagues
+        description: List every league the user belongs to this season
+        task:
+          type: model_method
+          modelIdOrName: ${{ inputs.instance }}
+          methodName: leagues
+          inputs:
+            season: ${{ inputs.season }}
+        dependsOn:
+          - step: state
+            condition:
+              type: succeeded
+        weight: 0
+        allowFailure: false
+      - name: league
+        description: Read the league's settings, roster slots, and scoring rules
+        task:
+          type: model_method
+          modelIdOrName: ${{ inputs.instance }}
+          methodName: league
+          inputs:
+            leagueId: ${{ inputs.leagueId }}
+        dependsOn:
+          - step: leagues
+            condition:
+              type: succeeded
+        weight: 0
+        allowFailure: false
+      - name: rosters
+        description: Read every roster, joined to owners, with standings derived
+        task:
+          type: model_method
+          modelIdOrName: ${{ inputs.instance }}
+          methodName: rosters
+          inputs:
+            leagueId: ${{ inputs.leagueId }}
+        dependsOn:
+          - step: league
+            condition:
+              type: succeeded
+        weight: 0
+        allowFailure: false
+      - name: matchups
+        description: Read this week's matchups, paired head to head
+        task:
+          type: model_method
+          modelIdOrName: ${{ inputs.instance }}
+          methodName: matchups
+          inputs:
+            leagueId: ${{ inputs.leagueId }}
+        dependsOn:
+          - step: rosters
+            condition:
+              type: succeeded
+        weight: 0
+        allowFailure: false
+      - name: transactions
+        description: Read this week's trades, waivers, and free-agent moves
+        task:
+          type: model_method
+          modelIdOrName: ${{ inputs.instance }}
+          methodName: transactions
+          inputs:
+            leagueId: ${{ inputs.leagueId }}
+        dependsOn:
+          - step: matchups
+            condition:
+              type: succeeded
+        weight: 0
+        allowFailure: false
+      - name: traded-picks
+        description: Read every draft pick that has changed hands
+        task:
+          type: model_method
+          modelIdOrName: ${{ inputs.instance }}
+          methodName: tradedPicks
+          inputs:
+            leagueId: ${{ inputs.leagueId }}
+        dependsOn:
+          - step: transactions
+            condition:
+              type: succeeded
+        weight: 0
+        allowFailure: false
+      - name: bracket
+        description: Read the championship bracket structure and any decided rounds
+        task:
+          type: model_method
+          modelIdOrName: ${{ inputs.instance }}
+          methodName: bracket
+          inputs:
+            leagueId: ${{ inputs.leagueId }}
+            bracket: winners
+        dependsOn:
+          - step: traded-picks
+            condition:
+              type: succeeded
+        weight: 0
+        allowFailure: false
+      - name: trending
+        description: Capture the league-wide waiver-wire signal for the week
+        task:
+          type: model_method
+          modelIdOrName: ${{ inputs.instance }}
+          methodName: trending
+          inputs:
+            trend: ${{ inputs.trend }}
+            limit: ${{ inputs.trendLimit }}
+        dependsOn:
+          - step: bracket
+            condition:
+              type: succeeded
+        weight: 0
+        allowFailure: false
+    dependsOn: []
+    weight: 0
+version: 1

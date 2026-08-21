@@ -1,0 +1,21 @@
+manifestVersion: 1
+name: "@dougschaefer/sleeper"
+version: "2026.08.21.1"
+description: "Read fantasy league state from the Sleeper platform's public read-only API — no key, no OAuth, no write surface. Resolve a username to a user ID, list leagues and drafts, and read a league in depth: settings and scoring, rosters with owners joined and standings derived, weekly matchups paired head to head, the transaction log, traded picks, playoff brackets, the draft board, and league-wide add/drop trends. Player IDs are resolved to names from a locally cached catalogue, and a missing record (which Sleeper reports as HTTP 200 with a null body) fails loudly instead of reading as empty."
+repository: https://github.com/dougschaefer6/swamp-sleeper
+additionalFiles:
+  - README.md
+  - LICENSE.txt
+labels:
+  - sleeper
+  - fantasy-football
+  - fantasy-sports
+  - nfl
+  - sports
+  - rest
+  - read-only
+  - workflow
+models:
+  - sleeper/sleeper.ts
+workflows:
+  - sleeper-league-snapshot.yaml
