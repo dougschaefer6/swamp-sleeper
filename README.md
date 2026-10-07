@@ -34,34 +34,35 @@ then run `leagues`:
 swamp model @dougschaefer/sleeper method run leagues sleeper-nfl
 ```
 
-| Global argument   | Default                       | Purpose                                    |
-| ----------------- | ----------------------------- | ------------------------------------------ |
-| `username`        | *(required)*                  | Sleeper username, case-insensitive         |
-| `sport`           | `nfl`                         | Sleeper sport code                         |
-| `defaultLeagueId` | —                             | League used when `leagueId` is omitted     |
-| `baseUrl`         | `https://api.sleeper.app/v1`  | API base URL                               |
-| `cdnUrl`          | `https://sleepercdn.com`      | CDN that serves avatars                    |
-| `timeoutMs`       | `30000`                       | Per-request timeout                        |
+| Global argument   | Default                      | Purpose                                |
+| ----------------- | ---------------------------- | -------------------------------------- |
+| `username`        | _(required)_                 | Sleeper username, case-insensitive     |
+| `sport`           | `nfl`                        | Sleeper sport code                     |
+| `defaultLeagueId` | —                            | League used when `leagueId` is omitted |
+| `baseUrl`         | `https://api.sleeper.app/v1` | API base URL                           |
+| `cdnUrl`          | `https://sleepercdn.com`     | CDN that serves avatars                |
+| `timeoutMs`       | `30000`                      | Per-request timeout                    |
 
 ## Methods
 
-| Method         | Reads                                                                    |
-| -------------- | ------------------------------------------------------------------------ |
-| `user`         | Username → user ID and avatar URLs. Run it first; everything keys off it. |
-| `state`        | The sport's current season, week, and season type.                       |
-| `leagues`      | Every league the user belongs to in a season, with IDs and draft IDs.     |
-| `league`       | One league's roster slots, scoring rules, playoffs, and waiver settings.  |
-| `rosters`      | Every roster, joined to owners and team names, with standings derived.    |
-| `matchups`     | One week's matchups, paired head to head, with the current margin.        |
-| `transactions` | One week's trades, waivers, and free-agent moves, with names resolved.    |
-| `tradedPicks`  | Every draft pick that has changed hands, including future seasons.        |
-| `bracket`      | The winners or losers playoff bracket.                                    |
-| `drafts`       | Drafts belonging to a league, or to the user across a season.             |
-| `draft`        | One draft's format, timing, and slot-to-roster mapping.                   |
-| `draftPicks`   | Every pick made, in board order, with a positional breakdown.             |
-| `syncPlayers`  | Downloads the player catalogue and caches a trimmed copy locally.         |
-| `trending`     | Players most added or dropped across all Sleeper leagues.                 |
-| `findPlayers`  | Searches the cached catalogue. Makes no API call.                         |
+| Method             | Reads                                                                     |
+| ------------------ | ------------------------------------------------------------------------- |
+| `user`             | Username → user ID and avatar URLs. Run it first; everything keys off it. |
+| `state`            | The sport's current season, week, and season type.                        |
+| `leagues`          | Every league the user belongs to in a season, with IDs and draft IDs.     |
+| `league`           | One league's roster slots, scoring rules, playoffs, and waiver settings.  |
+| `rosters`          | Every roster, joined to owners and team names, with standings derived.    |
+| `matchups`         | One week's matchups, paired head to head, with the current margin.        |
+| `transactions`     | One week's trades, waivers, and free-agent moves, with names resolved.    |
+| `tradedPicks`      | Every draft pick that has changed hands, including future seasons.        |
+| `bracket`          | The winners or losers playoff bracket.                                    |
+| `drafts`           | Drafts belonging to a league, or to the user across a season.             |
+| `draft`            | One draft's format, timing, and slot-to-roster mapping.                   |
+| `draftPicks`       | Every pick made, in board order, with a positional breakdown.             |
+| `draftTradedPicks` | Picks in one draft that changed hands, by roster ID.                      |
+| `syncPlayers`      | Downloads the player catalogue and caches a trimmed copy locally.         |
+| `trending`         | Players most added or dropped across all Sleeper leagues.                 |
+| `findPlayers`      | Searches the cached catalogue. Makes no API call.                         |
 
 ### Run the player sync first
 
@@ -133,13 +134,13 @@ Error: Sleeper has no record at /user/notarealuser: HTTP 200 with a null body
 
 **A genuinely empty collection is a real answer.** Before a draft, rosters exist
 with no players, and matchups, transactions, and draft picks all return `[]`.
-That is the league's true state, so every collection resource carries an explicit
-`count` and `empty`, plus a specific flag where one helps — `playersDrafted` on
-rosters, `orderKnown` on a draft, `decided` on a bracket. An empty result is
-never silently discarded and never reported as a failure.
+That is the league's true state, so every collection resource carries an
+explicit `count` and `empty`, plus a specific flag where one helps —
+`playersDrafted` on rosters, `orderKnown` on a draft, `decided` on a bracket. An
+empty result is never silently discarded and never reported as a failure.
 
 The week defaults follow from the same care. Sleeper's state endpoint reports a
-week within the *current* season type, so during the preseason `week: 2` means
+week within the _current_ season type, so during the preseason `week: 2` means
 the second preseason week. `matchups` and `transactions` fall back to week 1
 outside the regular season and record why in `weekSource`.
 

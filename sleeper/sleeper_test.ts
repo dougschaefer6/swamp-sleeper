@@ -10,10 +10,10 @@ import {
   type MethodContext,
   playerIndexInstance,
   resolveLeagueId,
-  sleeperList,
-  sleeperObject,
   type SleeperGlobalArgs,
+  sleeperList,
   SleeperNotFoundError,
+  sleeperObject,
   sleeperRequest,
   slugify,
 } from "./_client.ts";
@@ -107,6 +107,7 @@ Deno.test("model exposes every documented Sleeper read as a method", () => {
       "drafts",
       "draft",
       "draftPicks",
+      "draftTradedPicks",
       "syncPlayers",
       "trending",
       "findPlayers",
@@ -361,7 +362,10 @@ Deno.test("matchups pair rosters by matchup_id and report the margin", async () 
     if (url.includes("/users")) {
       return {
         status: 200,
-        body: JSON.stringify([{ user_id: "u1", display_name: "secondmanager" }]),
+        body: JSON.stringify([{
+          user_id: "u1",
+          display_name: "secondmanager",
+        }]),
       };
     }
     return {
@@ -525,7 +529,11 @@ Deno.test("draft picks prefer Sleeper's embedded names over the cache", async ()
         draft_slot: 1,
         roster_id: 1,
         player_id: "4034",
-        metadata: { first_name: "Christian", last_name: "McCaffrey", position: "RB" },
+        metadata: {
+          first_name: "Christian",
+          last_name: "McCaffrey",
+          position: "RB",
+        },
       },
     ]),
   }));
@@ -558,6 +566,105 @@ Deno.test("an un-started draft reports zero picks as empty", async () => {
   }
   assertEquals(rec.writes[0].data.empty, true);
   assertEquals(rec.writes[0].data.count, 0);
+});
+
+Deno.test("draftTradedPicks reads the draft's own traded-picks route", async () => {
+  const urls: string[] = [];
+  const restore = mockFetch((url) => {
+    urls.push(url);
+    return {
+      status: 200,
+      body: JSON.stringify([
+        {
+          season: "2026",
+          round: 2,
+          roster_id: 3,
+          previous_owner_id: 3,
+          owner_id: 7,
+          draft_id: "D1",
+        },
+        {
+          season: "2026",
+          round: 5,
+          roster_id: 1,
+          previous_owner_id: null,
+          owner_id: 4,
+        },
+      ]),
+    };
+  });
+  const { ctx, rec } = fakeContext();
+  try {
+    await methods.draftTradedPicks.execute({ draftId: "D1" }, ctx);
+  } finally {
+    restore();
+  }
+  assertEquals(urls, ["https://api.sleeper.app/v1/draft/D1/traded_picks"]);
+  assertEquals(rec.writes[0].spec, "draftTradedPicks");
+  assertEquals(rec.writes[0].name, "draftTradedPicks-D1");
+  const data = rec.writes[0].data;
+  assertEquals(data.draftId, "D1");
+  assertEquals(data.count, 2);
+  assertEquals(data.empty, false);
+  assertEquals(data.picks, [
+    {
+      season: "2026",
+      round: 2,
+      originalRosterId: 3,
+      previousOwnerId: 3,
+      currentOwnerId: 7,
+    },
+    {
+      season: "2026",
+      round: 5,
+      originalRosterId: 1,
+      previousOwnerId: null,
+      currentOwnerId: 4,
+    },
+  ]);
+});
+
+Deno.test("a draft with no traded picks is recorded as empty", async () => {
+  const restore = mockFetch(() => ({ status: 200, body: "[]" }));
+  const { ctx, rec } = fakeContext();
+  try {
+    await methods.draftTradedPicks.execute({ draftId: "D1" }, ctx);
+  } finally {
+    restore();
+  }
+  assertEquals(rec.writes[0].data.empty, true);
+  assertEquals(rec.writes[0].data.count, 0);
+});
+
+Deno.test("an unknown draft's traded picks fail loudly on a null body", async () => {
+  const restore = mockFetch(() => ({ status: 200, body: "null" }));
+  const { ctx, rec } = fakeContext();
+  try {
+    await assertRejects(
+      () => methods.draftTradedPicks.execute({ draftId: "D0" }, ctx),
+      SleeperNotFoundError,
+    );
+  } finally {
+    restore();
+  }
+  assertEquals(rec.writes.length, 0);
+});
+
+Deno.test("draftTradedPicks refuses a blank draft ID", async () => {
+  const { ctx } = fakeContext();
+  await assertRejects(
+    () => methods.draftTradedPicks.execute({ draftId: "" }, ctx),
+    Error,
+    "cannot be blank",
+  );
+});
+
+Deno.test("the latest upgrade targets the model version and keeps arguments", () => {
+  const upgrades = model.upgrades;
+  const last = upgrades[upgrades.length - 1];
+  assertEquals(last.toVersion, model.version);
+  const old = { username: "jdoe", sport: "nfl" };
+  assertEquals(last.upgradeAttributes(old), old);
 });
 
 Deno.test("a draft with no order set reports orderKnown false", async () => {
@@ -607,7 +714,12 @@ Deno.test("syncPlayers caches a trimmed catalogue and summarises it", async () =
         position: "WR",
         active: true,
       },
-      "99": { first_name: "Retired", last_name: "Guy", position: "RB", active: false },
+      "99": {
+        first_name: "Retired",
+        last_name: "Guy",
+        position: "RB",
+        active: false,
+      },
     }),
   }));
   const { ctx, rec } = fakeContext();
@@ -725,4 +837,48 @@ Deno.test("the method context type matches what methods actually use", () => {
   const { ctx } = fakeContext();
   const narrow: MethodContext = ctx;
   assertEquals(narrow.globalArgs.sport, "nfl");
+});
+
+Deno.test("tradedPicks reads the league route through the shared mapping", async () => {
+  const urls: string[] = [];
+  const restore = mockFetch((url) => {
+    urls.push(url);
+    return {
+      status: 200,
+      body: JSON.stringify([
+        {
+          season: "2027",
+          round: 1,
+          roster_id: 2,
+          previous_owner_id: 2,
+          owner_id: 5,
+        },
+        { season: "2027", round: 3, roster_id: 6, owner_id: 1 },
+      ]),
+    };
+  });
+  const { ctx, rec } = fakeContext();
+  try {
+    await methods.tradedPicks.execute({ leagueId: "L1" }, ctx);
+  } finally {
+    restore();
+  }
+  assertEquals(urls, ["https://api.sleeper.app/v1/league/L1/traded_picks"]);
+  assertEquals(rec.writes[0].name, "tradedPicks-L1");
+  assertEquals(rec.writes[0].data.picks, [
+    {
+      season: "2027",
+      round: 1,
+      originalRosterId: 2,
+      previousOwnerId: 2,
+      currentOwnerId: 5,
+    },
+    {
+      season: "2027",
+      round: 3,
+      originalRosterId: 6,
+      previousOwnerId: null,
+      currentOwnerId: 1,
+    },
+  ]);
 });

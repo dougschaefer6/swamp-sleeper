@@ -410,7 +410,7 @@ export interface LeagueMember {
  *
  * Sleeper's roster, matchup, and draft-pick records identify managers only by
  * an opaque user ID, so every method that reports on them joins this map to
- * turn `608827912585547776` into a display name and team name.
+ * turn `123456789012345678` into a display name and team name.
  */
 export async function fetchLeagueMembers(
   g: SleeperGlobalArgs,

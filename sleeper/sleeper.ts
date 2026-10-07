@@ -86,8 +86,16 @@ const PlayerEntrySchema = z.object({
  */
 export const model = {
   type: "@dougschaefer/sleeper",
-  version: "2026.08.21.1",
+  version: "2026.10.07.1",
   globalArguments: SleeperGlobalArgsSchema,
+  upgrades: [
+    {
+      toVersion: "2026.10.07.1",
+      description:
+        "Added the draftTradedPicks method and resource; globalArguments unchanged",
+      upgradeAttributes: (old: Record<string, unknown>) => old,
+    },
+  ],
   resources: {
     user: {
       description: "Sleeper user identity resolved from a username",
@@ -379,6 +387,24 @@ export const model = {
         capturedAt: z.iso.datetime(),
       }),
       lifetime: "infinite",
+      garbageCollection: 10,
+    },
+    draftTradedPicks: {
+      description: "Picks in one draft that changed hands before or during it",
+      schema: z.object({
+        draftId: z.string(),
+        count: z.number(),
+        empty: z.boolean(),
+        picks: z.array(z.object({
+          season: z.string(),
+          round: z.number(),
+          originalRosterId: z.number(),
+          previousOwnerId: z.number().nullable(),
+          currentOwnerId: z.number().nullable(),
+        })),
+        capturedAt: z.iso.datetime(),
+      }),
+      lifetime: "30d",
       garbageCollection: 10,
     },
     playersSummary: {
@@ -939,15 +965,7 @@ export const model = {
         const g = context.globalArgs;
         const leagueId = resolveLeagueId(g, args.leagueId);
         const rows = await sleeperList(g, `/league/${leagueId}/traded_picks`);
-        const picks = rows.map((row) => ({
-          season: str(row.season) ?? "",
-          round: num(row.round),
-          originalRosterId: num(row.roster_id),
-          previousOwnerId: row.previous_owner_id === null
-            ? null
-            : num(row.previous_owner_id),
-          currentOwnerId: row.owner_id === null ? null : num(row.owner_id),
-        }));
+        const picks = rows.map(tradedPick);
         const handle = await context.writeResource(
           "tradedPicks",
           `tradedPicks-${leagueId}`,
@@ -1230,6 +1248,40 @@ export const model = {
         return { dataHandles: [handle] };
       },
     },
+    draftTradedPicks: {
+      description:
+        "List the picks in one draft that changed hands, so a draft board's slot-to-roster mapping can be read against who actually owns each pick. Owner fields are roster IDs, as in tradedPicks. Empty when no pick in the draft was traded.",
+      arguments: z.object({
+        draftId: z.string().describe(
+          "Draft ID, as returned by the drafts or leagues method",
+        ),
+      }),
+      execute: async (
+        args: { draftId: string },
+        context: MethodContext,
+      ): Promise<{ dataHandles: DataHandle[] }> => {
+        const g = context.globalArgs;
+        const draftId = requireArg(args.draftId, "draftId");
+        const rows = await sleeperList(g, `/draft/${draftId}/traded_picks`);
+        const picks = rows.map(tradedPick);
+        const handle = await context.writeResource(
+          "draftTradedPicks",
+          `draftTradedPicks-${draftId}`,
+          {
+            draftId,
+            count: picks.length,
+            empty: picks.length === 0,
+            picks,
+            capturedAt: new Date().toISOString(),
+          },
+        );
+        context.logger.info(
+          "{n} traded pick(s) in draft {id}",
+          { n: picks.length, id: draftId },
+        );
+        return { dataHandles: [handle] };
+      },
+    },
     syncPlayers: {
       description:
         "Download the Sleeper player catalogue and cache a trimmed copy locally, so roster, draft, and trending reads can resolve player IDs to names. The full payload is ~14 MB and Sleeper asks that it be fetched no more than once a day.",
@@ -1495,6 +1547,23 @@ function numberMap(value: unknown): Record<string, number> {
     out[k] = num(v);
   }
   return out;
+}
+
+/**
+ * Map one Sleeper traded-pick record, which the league and draft endpoints
+ * share. `owner_id` and `previous_owner_id` are roster IDs, not user IDs.
+ */
+function tradedPick(row: Record<string, unknown>) {
+  return {
+    season: str(row.season) ?? "",
+    round: num(row.round),
+    originalRosterId: num(row.roster_id),
+    // `== null` so an absent field reads as null, never as a fake roster 0.
+    previousOwnerId: row.previous_owner_id == null
+      ? null
+      : num(row.previous_owner_id),
+    currentOwnerId: row.owner_id == null ? null : num(row.owner_id),
+  };
 }
 
 /**
